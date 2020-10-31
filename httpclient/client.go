@@ -1,15 +1,17 @@
-package http_client
+package httpclient
 
 import (
 	"bytes"
 	"encoding/json"
 	"fmt"
 	"io/ioutil"
+	"mime"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"time"
 
@@ -19,7 +21,8 @@ import (
 	"github.com/PuerkitoBio/goquery"
 )
 
-type Client struct {
+// Cli is a HTTP client
+type Cli struct {
 	client    *http.Client
 	debug     bool
 	dumpDir   string
@@ -29,8 +32,9 @@ type Client struct {
 	userAgent string
 }
 
-// Dump an HTTP transaction content into a file
-func (c *Client) DumpTransaction(req *http.Request, resp *http.Response, reqBody *[]byte, respBody *[]byte) {
+// DumpTransaction dumps an HTTP transaction content into a file
+func (c *Cli) DumpTransaction(req *http.Request, resp *http.Response, reqBody *[]byte, respBody *[]byte) {
+	// Create a dump file
 	fPath := filepath.Join(c.dumpDir, fmt.Sprintf("%04d.txt", c.reqNum))
 	f, err := os.Create(fPath)
 	if err != nil {
@@ -39,7 +43,10 @@ func (c *Client) DumpTransaction(req *http.Request, resp *http.Response, reqBody
 	}
 	defer f.Close()
 
-	// Request headers
+	// Dump method and URL
+	f.WriteString(fmt.Sprintf("%v %v\n\n", req.Method, req.URL))
+
+	// Dump request headers
 	for k, h := range req.Header {
 		for _, v := range h {
 			if _, err := f.Write([]byte(fmt.Sprintf("%v: %v\n", k, v))); err != nil {
@@ -48,9 +55,9 @@ func (c *Client) DumpTransaction(req *http.Request, resp *http.Response, reqBody
 			}
 		}
 	}
-	f.Write([]byte("\n"))
+	f.WriteString("\n")
 
-	// Request body
+	// Dump request body
 	if len(*reqBody) > 0 {
 		if _, err := f.Write(*reqBody); err != nil {
 			c.log.Err("error writing http dump file %v: %v", fPath, err)
@@ -63,12 +70,12 @@ func (c *Client) DumpTransaction(req *http.Request, resp *http.Response, reqBody
 		}
 	}
 
-	f.Write([]byte("\n"))
+	f.WriteString("\n")
 
 	// Request and response separator
-	f.Write([]byte("\n---\n\n"))
+	f.WriteString("\n---\n\n")
 
-	// Response headers
+	// Dump response headers
 	for k, h := range resp.Header {
 		for _, v := range h {
 			if _, err := f.Write([]byte(fmt.Sprintf("%v: %v\n", k, v))); err != nil {
@@ -77,9 +84,9 @@ func (c *Client) DumpTransaction(req *http.Request, resp *http.Response, reqBody
 			}
 		}
 	}
-	f.Write([]byte("\n"))
+	f.WriteString("\n")
 
-	// Response body
+	// Dump response body
 	if len(*respBody) > 0 {
 		if _, err := f.Write(*respBody); err != nil {
 			c.log.Err("error writing http dump file %v: %v", fPath, err)
@@ -93,8 +100,8 @@ func (c *Client) DumpTransaction(req *http.Request, resp *http.Response, reqBody
 	}
 }
 
-// Perform an HTTP request
-func (c *Client) Request(method, u string, header *http.Header, body []byte) (*http.Response, *[]byte, error) {
+// Request performs an HTTP request
+func (c *Cli) Request(method, u string, header *http.Header, body []byte) (*http.Response, *[]byte, error) {
 	var (
 		err      error
 		req      *http.Request
@@ -127,10 +134,10 @@ func (c *Client) Request(method, u string, header *http.Header, body []byte) (*h
 	req.Header = *header
 
 	// Send request
-	c.reqNum += 1
+	c.reqNum++
 	resp, err = c.client.Do(req)
 	if err != nil {
-		c.log.Debug("req #%d: %v %v; error: %v", c.reqNum, method, u, err)
+		c.log.Err("req #%d: %v %v; error: %v", c.reqNum, method, u, err)
 	} else {
 		c.log.Debug("req #%d: %v %v; status: %v", c.reqNum, method, u, resp.Status)
 	}
@@ -155,18 +162,18 @@ func (c *Client) Request(method, u string, header *http.Header, body []byte) (*h
 	return resp, &respBody, err
 }
 
-// Perform a GET request
-func (c *Client) Get(u string, args *url.Values, header *http.Header) (*[]byte, error) {
+// Get perform a GET request
+func (c *Cli) Get(u string, args *url.Values, header *http.Header) (*[]byte, error) {
 	if args != nil {
-		u = util.CombineUrl(u, "", args)
+		u = util.CombineURL(u, "", args)
 	}
 
 	_, body, err := c.Request("GET", u, header, []byte(""))
 	return body, err
 }
 
-// Perform a GET request and transform response into a goquery document
-func (c *Client) GetQueryDoc(u string, args *url.Values, header *http.Header) (*goquery.Document, error) {
+// GetQueryDoc performs a GET request and transform response into a goquery document
+func (c *Cli) GetQueryDoc(u string, args *url.Values, header *http.Header) (*goquery.Document, error) {
 	body, err := c.Get(u, args, header)
 	if err != nil {
 		return nil, err
@@ -180,7 +187,8 @@ func (c *Client) GetQueryDoc(u string, args *url.Values, header *http.Header) (*
 	return doc, nil
 }
 
-func (c *Client) GetJson(u string, args *url.Values, header *http.Header, data interface{}) error {
+// GetJSON performs a GET HTTP request and parses the response into a JSON
+func (c *Cli) GetJSON(u string, args *url.Values, header *http.Header, data interface{}) error {
 	if header == nil {
 		header = &http.Header{}
 	}
@@ -196,26 +204,50 @@ func (c *Client) GetJson(u string, args *url.Values, header *http.Header, data i
 	return json.Unmarshal(*body, data)
 }
 
-// Get a file
-func (c *Client) GetFile(u string, args *url.Values, header *http.Header, fPath string) error {
-	body, err := c.Get(u, args, header)
+// GetFile gets a file and stores it on the disk.
+//
+// If fPath doesn't contain an extension, it will be added automatically.
+// In case of success file extension returned
+func (c *Cli) GetFile(u string, args *url.Values, header *http.Header, fPath string) (string, error) {
+	fExt := ""
+
+	if args != nil {
+		u = util.CombineURL(u, "", args)
+	}
+
+	resp, body, err := c.Request("GET", u, header, nil)
 	if err != nil {
-		return err
+		return "", err
+	}
+
+	// Calculate file extension
+	if !filepath.IsAbs(fPath) {
+		if fPath, err = filepath.Abs(fPath); err != nil {
+			return "", err
+		}
+	}
+	if !regexp.MustCompile(`\.[a-zA-Z0-9]+$`).Match([]byte(fPath)) {
+		fExtArr, err := mime.ExtensionsByType(resp.Header.Get("Content-Type"))
+		if err != nil {
+			return "", fmt.Errorf("unable to determine file extension: %v", err)
+		}
+		fExt = fExtArr[len(fExtArr)-1]
+		fPath += fExt
 	}
 
 	f, err := os.Create(fPath)
 	if err != nil {
-		return fmt.Errorf("error creating file %v: %v", fPath, err)
+		return "", fmt.Errorf("error creating file %v: %v", fPath, err)
 	}
 
 	f.Write(*body)
 	f.Close()
 
-	return nil
+	return fExt, nil
 }
 
-// Perform a POST request
-func (c *Client) Post(u string, args *url.Values, header *http.Header) (*[]byte, error) {
+// Post performs a POST request
+func (c *Cli) Post(u string, args *url.Values, header *http.Header) (*[]byte, error) {
 	if header == nil {
 		header = &http.Header{}
 	}
@@ -227,11 +259,11 @@ func (c *Client) Post(u string, args *url.Values, header *http.Header) (*[]byte,
 	return body, err
 }
 
-// Instantiate a client
-func New(name string, debug bool, dumpDir, userAgent string) (*Client, error) {
+// New instantiates a client
+func New(name string, debug bool, dumpDir, userAgent string) (*Cli, error) {
 	var err error
 
-	sId := fmt.Sprintf("%d", time.Now().Unix())
+	sID := fmt.Sprintf("%d", time.Now().Unix())
 	log := logger.New(name, logger.LvInfo)
 
 	if debug {
@@ -243,12 +275,12 @@ func New(name string, debug bool, dumpDir, userAgent string) (*Client, error) {
 		if err != nil {
 			return nil, err
 		}
-		dumpDir = filepath.Join(dumpDir, sId)
+		dumpDir = filepath.Join(dumpDir, sID)
 
 		// Make dump directory
 		err = os.MkdirAll(dumpDir, 0700)
 		if err != nil {
-			return nil, fmt.Errorf("failed to create dump directory: %v\n", err)
+			return nil, fmt.Errorf("failed to create dump directory: %v", err)
 		}
 		log.Info("dump directory: %v\n", dumpDir)
 	}
@@ -260,11 +292,11 @@ func New(name string, debug bool, dumpDir, userAgent string) (*Client, error) {
 		return nil, err
 	}
 
-	return &Client{
+	return &Cli{
 		client:    &c,
 		debug:     debug,
 		dumpDir:   dumpDir,
-		id:        sId,
+		id:        sID,
 		log:       log,
 		userAgent: userAgent,
 	}, nil
