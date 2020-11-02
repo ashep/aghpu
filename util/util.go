@@ -69,3 +69,17 @@ func AppendUniqueString(s []string, em string) []string {
 
 	return s
 }
+
+// ReplaceChars replaces all `chars` in `s` with `repl`
+func ReplaceChars(s, chars, repl string) string {
+	for i := 0; i < len(chars); i++ {
+		s = strings.ReplaceAll(s, string(chars[i]), repl)
+	}
+
+	return s
+}
+
+// SanitizeFilename makes filename sane
+func SanitizeFilename(s, repl string) string {
+	return ReplaceChars(s, " \\/,:;`~+!\"'#$%^&*(){}[]", repl)
+}

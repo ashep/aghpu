@@ -23,13 +23,19 @@ import (
 
 // Cli is a HTTP client
 type Cli struct {
-	client    *http.Client
-	debug     bool
-	dumpDir   string
-	id        string
-	log       *logger.Logger
-	reqNum    int
-	userAgent string
+	client     *http.Client
+	debug      bool
+	dumpDir    string
+	id         string
+	log        *logger.Logger
+	reqNum     int
+	userAgent  string
+	currentURL *url.URL
+}
+
+// CurrentURL returns last requested URL taking redirects into account
+func (c *Cli) CurrentURL() *url.URL {
+	return c.currentURL
 }
 
 // DumpTransaction dumps an HTTP transaction content into a file
@@ -113,17 +119,20 @@ func (c *Cli) Request(method, u string, header *http.Header, body []byte) (*http
 	if header == nil {
 		header = &http.Header{}
 	}
-	if header.Get("user-agent") == "" {
-		header.Add("user-agent", c.userAgent)
+	if header.Get("User-Agent") == "" {
+		header.Set("User-Agent", c.userAgent)
 	}
-	if header.Get("accept") == "" {
-		header.Add("accept", "*/*")
+	if header.Get("Accept") == "" {
+		header.Set("Accept", "*/*")
 	}
-	if header.Get("accept-language") == "" {
-		header.Add("accept-language", "en-US,en;q=0.9,ru;q=0.8,uk;q=0.7")
+	if header.Get("Accept-Language") == "" {
+		header.Set("Accept-Language", "en-US,en;q=0.9,ru;q=0.8,uk;q=0.7")
 	}
-	if header.Get("cache-control") == "" {
-		header.Add("cache-control", "max-age=0")
+	if header.Get("Cache-Control") == "" {
+		header.Set("Cache-Control", "max-age=0")
+	}
+	if header.Get("Referer") == "" && c.currentURL != nil {
+		header.Set("Referer", c.currentURL.String())
 	}
 
 	// Create request
@@ -135,6 +144,7 @@ func (c *Cli) Request(method, u string, header *http.Header, body []byte) (*http
 
 	// Send request
 	c.reqNum++
+	c.currentURL = req.URL
 	resp, err = c.client.Do(req)
 	if err != nil {
 		c.log.Err("req #%d: %v %v; error: %v", c.reqNum, method, u, err)
@@ -192,8 +202,8 @@ func (c *Cli) GetJSON(u string, args *url.Values, header *http.Header, data inte
 	if header == nil {
 		header = &http.Header{}
 	}
-	if header.Get("x-requested-with") == "" {
-		header.Add("x-requested-with", "XMLHttpRequest")
+	if header.Get("X-Requested-With") == "" {
+		header.Set("X-Requested-With", "XMLHttpRequest")
 	}
 
 	body, err := c.Get(u, args, header)
@@ -260,11 +270,10 @@ func (c *Cli) Post(u string, args *url.Values, header *http.Header) (*[]byte, er
 }
 
 // New instantiates a client
-func New(name string, debug bool, dumpDir, userAgent string) (*Cli, error) {
+func New(name string, debug bool, dumpDir, userAgent string, log *logger.Logger) (*Cli, error) {
 	var err error
 
 	sID := fmt.Sprintf("%d", time.Now().Unix())
-	log := logger.New(name, logger.LvInfo)
 
 	if debug {
 		log.Info("debug mode enabled")
@@ -292,12 +301,24 @@ func New(name string, debug bool, dumpDir, userAgent string) (*Cli, error) {
 		return nil, err
 	}
 
-	return &Cli{
+	if userAgent == "" {
+		userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+			"(KHTML, like Gecko) Chrome/86.0.4240.75 Safari/537.36"
+	}
+
+	cli := &Cli{
 		client:    &c,
 		debug:     debug,
 		dumpDir:   dumpDir,
 		id:        sID,
 		log:       log,
 		userAgent: userAgent,
-	}, nil
+	}
+
+	c.CheckRedirect = func(req *http.Request, via []*http.Request) error {
+		cli.currentURL = req.URL
+		return nil
+	}
+
+	return cli, nil
 }
