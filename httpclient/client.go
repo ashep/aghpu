@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"mime"
+	"net"
 	"net/http"
 	"net/http/cookiejar"
 	"net/url"
@@ -23,7 +24,7 @@ import (
 
 // Cli is a HTTP client
 type Cli struct {
-	client     *http.Client
+	cli        *http.Client
 	debug      bool
 	dumpDir    string
 	id         string
@@ -31,11 +32,34 @@ type Cli struct {
 	reqNum     int
 	userAgent  string
 	currentURL *url.URL
+	reqErrH    RequestErrorHandler
+	reqTries   int
+}
+
+// RequestErrorHandler is HTTP request error handler
+type RequestErrorHandler func(c *Cli, req *http.Request, err error, tryN int) error
+
+// SetRequestErrorHandler sets HTTP request error handler
+func (c *Cli) SetRequestErrorHandler(fn RequestErrorHandler) {
+	c.reqErrH = fn
 }
 
 // CurrentURL returns last requested URL taking redirects into account
 func (c *Cli) CurrentURL() *url.URL {
 	return c.currentURL
+}
+
+// Reset resets the client
+func (c *Cli) Reset() error {
+	c.currentURL = nil
+
+	if j, err := cookiejar.New(&cookiejar.Options{}); err == nil {
+		c.cli.Jar = j
+	} else {
+		return err
+	}
+
+	return nil
 }
 
 // DumpTransaction dumps an HTTP transaction content into a file
@@ -144,24 +168,37 @@ func (c *Cli) Request(method, u string, header *http.Header, body []byte) (*http
 
 	// Send request
 	c.reqNum++
-	c.currentURL = req.URL
-	resp, err = c.client.Do(req)
-	if err != nil {
-		c.log.Err("req #%d: %v %v; error: %v", c.reqNum, method, u, err)
-	} else {
-		c.log.Debug("req #%d: %v %v; status: %v", c.reqNum, method, u, resp.Status)
+	tryN := 1
+	for ; ; tryN++ {
+		c.currentURL = req.URL
+		resp, err = c.cli.Do(req)
+
+		if err == nil {
+			break
+		}
+
+		c.log.Err("req #%d(%v): %v %v; error: %v", c.reqNum, tryN, method, u, err)
+
+		if tryN == c.reqTries {
+			return nil, nil, err
+		}
+
+		if c.reqErrH != nil {
+			if hErr := c.reqErrH(c, req, err, tryN); hErr != nil {
+				return nil, nil, fmt.Errorf("%v, %v", err, hErr)
+			}
+		}
 	}
+	c.log.Debug("req #%d(%v): %v %v; status: %v", c.reqNum, tryN, method, u, resp.Status)
 
 	// Load response body
-	if resp != nil {
-		defer resp.Body.Close()
-		if respBody, err = ioutil.ReadAll(resp.Body); err != nil {
-			return resp, nil, fmt.Errorf("error while reading response body: %v", err)
-		}
+	defer resp.Body.Close()
+	if respBody, err = ioutil.ReadAll(resp.Body); err != nil {
+		return resp, nil, fmt.Errorf("error while reading response body: %v", err)
+	}
 
-		if c.debug {
-			c.DumpTransaction(req, resp, &body, &respBody)
-		}
+	if c.debug {
+		c.DumpTransaction(req, resp, &body, &respBody)
 	}
 
 	// Check response status
@@ -269,11 +306,40 @@ func (c *Cli) Post(u string, args *url.Values, header *http.Header) (*[]byte, er
 	return body, err
 }
 
+// GetExtIPAddrInfo returns information about client's external IP address
+func (c *Cli) GetExtIPAddrInfo() (string, error) {
+	var (
+		b   *[]byte
+		r   string
+		err error
+	)
+
+	if b, err = c.Get("https://ifconfig.io/ip", nil, nil); err != nil {
+		return r, err
+	}
+	r += fmt.Sprintf("address: %s", *b)
+
+	if b, err = c.Get("https://ifconfig.io/country_code", nil, nil); err != nil {
+		return r, err
+	}
+	r = fmt.Sprintf("%v, region: %s", r, *b)
+
+	return strings.ReplaceAll(r, "\n", ""), nil
+}
+
 // New instantiates a client
-func New(name string, debug bool, dumpDir, userAgent string, log *logger.Logger) (*Cli, error) {
+func New(name string, debug bool, dumpDir, userAgent, proxyURL string, log *logger.Logger,
+	reqErrH RequestErrorHandler) (*Cli, error) {
+
 	var err error
 
 	sID := fmt.Sprintf("%d", time.Now().Unix())
+
+	if log == nil {
+		if log, err = logger.New(name, logger.LvInfo, ""); err != nil {
+			return nil, err
+		}
+	}
 
 	if debug {
 		log.Info("debug mode enabled")
@@ -294,7 +360,29 @@ func New(name string, debug bool, dumpDir, userAgent string, log *logger.Logger)
 		log.Info("dump directory: %v\n", dumpDir)
 	}
 
-	c := http.Client{}
+	tr := &http.Transport{
+		Proxy: func(r *http.Request) (*url.URL, error) {
+			if proxyURL != "" {
+				return url.Parse(proxyURL)
+			}
+			return nil, nil
+		},
+		DialContext: (&net.Dialer{
+			Timeout:   30 * time.Second,
+			KeepAlive: 30 * time.Second,
+			DualStack: true,
+		}).DialContext,
+		ForceAttemptHTTP2:     true,
+		MaxIdleConns:          100,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+	}
+
+	c := http.Client{
+		Transport: tr,
+		Timeout:   60 * time.Second,
+	}
 
 	c.Jar, err = cookiejar.New(&cookiejar.Options{})
 	if err != nil {
@@ -307,12 +395,14 @@ func New(name string, debug bool, dumpDir, userAgent string, log *logger.Logger)
 	}
 
 	cli := &Cli{
-		client:    &c,
+		cli:       &c,
 		debug:     debug,
 		dumpDir:   dumpDir,
 		id:        sID,
 		log:       log,
 		userAgent: userAgent,
+		reqErrH:   reqErrH,
+		reqTries:  10,
 	}
 
 	c.CheckRedirect = func(req *http.Request, via []*http.Request) error {
