@@ -61,7 +61,7 @@ func IndexString(s []string, em string) int {
 	return -1
 }
 
-// AppendUniqueString appends a string to a slice
+// AppendUniqueString appends a string to a slice of strings only if the slice doesn't contain the same string
 func AppendUniqueString(s []string, em string) []string {
 	if IndexString(s, em) == -1 {
 		s = append(s, em)
