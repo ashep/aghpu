@@ -50,8 +50,8 @@ func CombineURL(a string, b string, args *url.Values) string {
 	return aURL.String()
 }
 
-// IndexString returns position of string in a slice
-func IndexString(s []string, em string) int {
+// GetStrSliceIndex returns position of string in a slice
+func GetStrSliceIndex(s []string, em string) int {
 	for i := range s {
 		if s[i] == em {
 			return i
@@ -63,7 +63,7 @@ func IndexString(s []string, em string) int {
 
 // AppendUniqueString appends a string to a slice of strings only if the slice doesn't contain the same string
 func AppendUniqueString(s []string, em string) []string {
-	if IndexString(s, em) == -1 {
+	if GetStrSliceIndex(s, em) == -1 {
 		s = append(s, em)
 	}
 
@@ -82,4 +82,14 @@ func ReplaceChars(s, chars, repl string) string {
 // SanitizeFilename makes filename sane
 func SanitizeFilename(s, repl string) string {
 	return ReplaceChars(s, " \\/,:;`~+!\"'#$%^&*(){}[]", repl)
+}
+
+// StrSliceToMap merges two string slices into a map of strings
+func StrSliceToMap(keys, values []string) map[string]string {
+	r := make(map[string]string)
+	for i, k := range keys {
+		r[k] = values[i]
+	}
+
+	return r
 }
