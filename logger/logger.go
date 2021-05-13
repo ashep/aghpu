@@ -8,15 +8,11 @@ import (
 )
 
 const (
-	// LvOff logging disabled
-	LvOff = iota
-	// LvErr errors
+	LvDisabled = iota
+	LvFatal
 	LvErr
-	// LvWarn warnings
 	LvWarn
-	// LvInfo information
 	LvInfo
-	// LvDebug debug
 	LvDebug
 )
 
@@ -28,11 +24,15 @@ type Logger struct {
 }
 
 // New creates a new logger
-func New(name string, level int, dirPath string) (*Logger, error) {
+func New(name string, level int, dirPath, fName string) (*Logger, error) {
 	var lFile *log.Logger
 
+	if fName == "" {
+		fName = name + ".log"
+	}
+
 	if dirPath != "" {
-		f, err := os.Create(filepath.Join(dirPath, name+".log"))
+		f, err := os.Create(filepath.Join(dirPath, fName))
 		if err != nil {
 			return nil, err
 		}
@@ -47,6 +47,11 @@ func (l *Logger) SetLevel(level int) {
 	l.level = level
 }
 
+// GetLevel returns logging level.
+func (l *Logger) GetLevel() int {
+	return l.level
+}
+
 // Log logs a message
 func (l *Logger) Log(level, f string, v ...interface{}) {
 	f = fmt.Sprintf("[%s] %s: %s", level, l.name, f)
@@ -54,6 +59,14 @@ func (l *Logger) Log(level, f string, v ...interface{}) {
 	if l.file != nil {
 		l.file.Printf(f, v...)
 	}
+}
+
+// Fatal logs a fatal error and exits.
+func (l *Logger) Fatal(f string, v ...interface{}) {
+	if l.level >= LvFatal {
+		l.Log("F", f, v...)
+	}
+	os.Exit(1)
 }
 
 // Err logs an error

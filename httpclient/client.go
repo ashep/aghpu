@@ -32,15 +32,15 @@ type Cli struct {
 	reqNum     int
 	userAgent  string
 	currentURL *url.URL
-	reqErrH    RequestErrorHandler
+	reqErrH    ErrorHandler
 	reqTries   int
 }
 
-// RequestErrorHandler is HTTP request error handler
-type RequestErrorHandler func(c *Cli, req *http.Request, err error, tryN int) error
+// ErrorHandler is HTTP request error handler
+type ErrorHandler func(c *Cli, req *http.Request, err error, tryN int) error
 
 // SetRequestErrorHandler sets HTTP request error handler
-func (c *Cli) SetRequestErrorHandler(fn RequestErrorHandler) {
+func (c *Cli) SetRequestErrorHandler(fn ErrorHandler) {
 	c.reqErrH = fn
 }
 
@@ -282,6 +282,7 @@ func (c *Cli) GetFile(u string, args *url.Values, header *http.Header, fPath str
 		fPath += fExt
 	}
 
+	// Write file to disk
 	f, err := os.Create(fPath)
 	if err != nil {
 		return "", fmt.Errorf("error creating file %v: %v", fPath, err)
@@ -328,23 +329,19 @@ func (c *Cli) GetExtIPAddrInfo() (string, error) {
 }
 
 // New instantiates a client
-func New(name string, debug bool, dumpDir, userAgent, proxyURL string, log *logger.Logger,
-	reqErrH RequestErrorHandler) (*Cli, error) {
-
+func New(name string, dumpDir, ua, prxURL string, log *logger.Logger, onErr ErrorHandler) (*Cli, error) {
 	var err error
 
+	debug := log.GetLevel() >= logger.LvDebug
 	sID := fmt.Sprintf("%d", time.Now().Unix())
 
 	if log == nil {
-		if log, err = logger.New(name, logger.LvInfo, ""); err != nil {
+		if log, err = logger.New(name, logger.LvInfo, ".", ""); err != nil {
 			return nil, err
 		}
 	}
 
 	if debug {
-		log.Info("debug mode enabled")
-		log.SetLevel(logger.LvDebug)
-
 		// Calculate dump directory
 		dumpDir, err = filepath.Abs(dumpDir)
 		if err != nil {
@@ -362,15 +359,14 @@ func New(name string, debug bool, dumpDir, userAgent, proxyURL string, log *logg
 
 	tr := &http.Transport{
 		Proxy: func(r *http.Request) (*url.URL, error) {
-			if proxyURL != "" {
-				return url.Parse(proxyURL)
+			if prxURL != "" {
+				return url.Parse(prxURL)
 			}
 			return nil, nil
 		},
 		DialContext: (&net.Dialer{
 			Timeout:   30 * time.Second,
 			KeepAlive: 30 * time.Second,
-			DualStack: true,
 		}).DialContext,
 		ForceAttemptHTTP2:     true,
 		MaxIdleConns:          100,
@@ -389,8 +385,8 @@ func New(name string, debug bool, dumpDir, userAgent, proxyURL string, log *logg
 		return nil, err
 	}
 
-	if userAgent == "" {
-		userAgent = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
+	if ua == "" {
+		ua = "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 " +
 			"(KHTML, like Gecko) Chrome/86.0.4240.75 Safari/537.36"
 	}
 
@@ -400,8 +396,8 @@ func New(name string, debug bool, dumpDir, userAgent, proxyURL string, log *logg
 		dumpDir:   dumpDir,
 		id:        sID,
 		log:       log,
-		userAgent: userAgent,
-		reqErrH:   reqErrH,
+		userAgent: ua,
+		reqErrH:   onErr,
 		reqTries:  10,
 	}
 

@@ -2,9 +2,19 @@ package util
 
 import (
 	"net/url"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
+
+	csv "github.com/tushar2708/altcsv"
 )
+
+// GetExecDir returns directory where program executable is located.
+func GetExecDir() string {
+	r, _ := filepath.Abs(filepath.Dir(os.Args[0]))
+	return r
+}
 
 // TidyHTMLText cleans an HTML text
 func TidyHTMLText(s string) string {
@@ -92,4 +102,46 @@ func StrSliceToMap(keys, values []string) map[string]string {
 	}
 
 	return r
+}
+
+// MapStrBoolToSlice returns keys of string keyed map as a slice.
+func MapStrBoolToSlice(m map[string]bool) []string {
+	var r []string
+	for k, _ := range m {
+		r = append(r, k)
+	}
+	return r
+}
+
+// CSVToMap loads a CSV file into a map
+func CSVToMap(fPath string) ([]map[string]string, error) {
+	fp, err := os.Open(fPath)
+	if err != nil {
+		return nil, err
+	}
+	defer func(fp *os.File) { _ = fp.Close() }(fp)
+
+	rd := csv.NewReader(fp)
+	records, err := rd.ReadAll()
+	if err != nil {
+		return nil, err
+	}
+
+	fNames := make([]string, 0)
+	r := make([]map[string]string, 0)
+	for i, row := range records {
+		if i == 0 {
+			fNames = row
+			continue
+		}
+
+		rowMap := make(map[string]string)
+		for k, col := range row {
+			rowMap[fNames[k]] = col
+		}
+
+		r = append(r, rowMap)
+	}
+
+	return r, nil
 }
