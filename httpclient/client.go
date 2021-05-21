@@ -274,9 +274,12 @@ func (c *Cli) GetFile(u string, args *url.Values, header *http.Header, fPath str
 		}
 	}
 	if !regexp.MustCompile(`\.[a-zA-Z0-9]+$`).Match([]byte(fPath)) {
-		fExtArr, err := mime.ExtensionsByType(resp.Header.Get("Content-Type"))
-		if err != nil {
-			return "", fmt.Errorf("unable to determine file extension: %v", err)
+		cType := resp.Header.Get("Content-Type")
+		cType = strings.ReplaceAll(cType, "/jpg", "/jpeg")
+
+		fExtArr, err := mime.ExtensionsByType(cType)
+		if err != nil || len(fExtArr) == 0 {
+			return "", fmt.Errorf("unable to determine file extension for content type %q: %v", cType, err)
 		}
 		fExt = fExtArr[len(fExtArr)-1]
 		fPath += fExt
