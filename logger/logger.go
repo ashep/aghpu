@@ -42,14 +42,33 @@ func New(name string, level int, dirPath, fName string) (*Logger, error) {
 	return &Logger{name, level, lFile}, nil
 }
 
+// Copy creates a copy of the logger
+func (l *Logger) Copy(name string, level int) *Logger {
+	return &Logger{
+		name:  name,
+		level: level,
+		file:  l.file,
+	}
+}
+
+// Name returns logger name
+func (l *Logger) Name() string {
+	return l.name
+}
+
+// SetName sets logger name
+func (l *Logger) SetName(name string) {
+	l.name = name
+}
+
+// Level returns logging level
+func (l *Logger) Level() int {
+	return l.level
+}
+
 // SetLevel sets logging level
 func (l *Logger) SetLevel(level int) {
 	l.level = level
-}
-
-// GetLevel returns logging level.
-func (l *Logger) GetLevel() int {
-	return l.level
 }
 
 // Log logs a message
@@ -61,7 +80,7 @@ func (l *Logger) Log(level, f string, v ...interface{}) {
 	}
 }
 
-// Fatal logs a fatal error and exits.
+// Fatal logs a fatal error and exits
 func (l *Logger) Fatal(f string, v ...interface{}) {
 	if l.level >= LvFatal {
 		l.Log("F", f, v...)

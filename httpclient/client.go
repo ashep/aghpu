@@ -335,7 +335,7 @@ func (c *Cli) GetExtIPAddrInfo() (string, error) {
 func New(name string, dumpDir, ua, prxURL string, log *logger.Logger, onErr ErrorHandler) (*Cli, error) {
 	var err error
 
-	debug := log.GetLevel() >= logger.LvDebug
+	debug := log.Level() >= logger.LvDebug
 	sID := fmt.Sprintf("%d", time.Now().Unix())
 
 	if log == nil {
