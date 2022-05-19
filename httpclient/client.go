@@ -39,6 +39,11 @@ type Cli struct {
 // ErrorHandler is HTTP request error handler
 type ErrorHandler func(c *Cli, req *http.Request, err error, tryN int) error
 
+// Client returns underlying http client
+func (c *Cli) Client() *http.Client {
+	return c.cli
+}
+
 // SetRequestErrorHandler sets HTTP request error handler
 func (c *Cli) SetRequestErrorHandler(fn ErrorHandler) {
 	c.reqErrH = fn
