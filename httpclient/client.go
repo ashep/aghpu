@@ -340,14 +340,14 @@ func (c *Cli) GetExtIPAddrInfo() (string, error) {
 func New(name string, dumpDir, ua, prxURL string, log *logger.Logger, onErr ErrorHandler) (*Cli, error) {
 	var err error
 
-	debug := log.Level() >= logger.LvDebug
-	sID := fmt.Sprintf("%d", time.Now().Unix())
-
 	if log == nil {
 		if log, err = logger.New(name, logger.LvInfo, ".", ""); err != nil {
 			return nil, err
 		}
 	}
+
+	debug := log.Level() >= logger.LvDebug
+	sID := fmt.Sprintf("%d", time.Now().Unix())
 
 	if debug {
 		// Calculate dump directory
