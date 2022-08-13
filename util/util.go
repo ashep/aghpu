@@ -30,7 +30,7 @@ func TidyHTMLText(s string) string {
 }
 
 // CombineURL combines two URLs
-func CombineURL(a string, b string, args *url.Values) string {
+func CombineURL(a string, b string, args url.Values) string {
 	aURL, err := url.Parse(a)
 	if err != nil {
 		return ""
@@ -48,7 +48,7 @@ func CombineURL(a string, b string, args *url.Values) string {
 
 	if args != nil {
 		q := aURL.Query()
-		for k, v := range *args {
+		for k, v := range args {
 			for _, sv := range v {
 				q.Add(k, sv)
 			}

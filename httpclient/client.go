@@ -24,16 +24,18 @@ import (
 
 // Cli is a HTTP client
 type Cli struct {
-	cli        *http.Client
-	debug      bool
-	dumpDir    string
-	id         string
-	log        *logger.Logger
-	reqNum     int
-	userAgent  string
-	currentURL *url.URL
+	id        string
+	debug     bool
+	dumpDir   string
+	reqTries  int
+	userAgent string
+
 	reqErrH    ErrorHandler
-	reqTries   int
+	reqNum     int
+	currentURL *url.URL
+
+	cli *http.Client
+	l   *logger.Logger
 }
 
 // ErrorHandler is HTTP request error handler
@@ -68,75 +70,91 @@ func (c *Cli) Reset() error {
 }
 
 // DumpTransaction dumps an HTTP transaction content into a file
-func (c *Cli) DumpTransaction(req *http.Request, resp *http.Response, reqBody *[]byte, respBody *[]byte) {
+func (c *Cli) DumpTransaction(req *http.Request, resp *http.Response, reqBody []byte, respBody []byte) {
 	// Create a dump file
 	fPath := filepath.Join(c.dumpDir, fmt.Sprintf("%04d.txt", c.reqNum))
 	f, err := os.Create(fPath)
 	if err != nil {
-		c.log.Err("error creating http dump file %v: %v", fPath, err)
+		c.l.Err("error creating http dump file %v: %v", fPath, err)
 		return
 	}
-	defer f.Close()
+	defer func() {
+		_ = f.Close()
+	}()
 
 	// Dump method and URL
-	f.WriteString(fmt.Sprintf("%v %v\n\n", req.Method, req.URL))
+	if _, err := f.WriteString(fmt.Sprintf("%v %v\n\n", req.Method, req.URL)); err != nil {
+		c.l.Err("failed to write string: %s", err.Error())
+		return
+	}
 
 	// Dump request headers
 	for k, h := range req.Header {
 		for _, v := range h {
 			if _, err := f.Write([]byte(fmt.Sprintf("%v: %v\n", k, v))); err != nil {
-				c.log.Err("error writing http dump file %v: %v", fPath, err)
+				c.l.Err("error writing http dump file %v: %v", fPath, err)
 				return
 			}
 		}
 	}
-	f.WriteString("\n")
+	if _, err := f.WriteString("\n"); err != nil {
+		c.l.Err("failed to write string: %s", err.Error())
+		return
+	}
 
 	// Dump request body
-	if len(*reqBody) > 0 {
-		if _, err := f.Write(*reqBody); err != nil {
-			c.log.Err("error writing http dump file %v: %v", fPath, err)
+	if len(reqBody) > 0 {
+		if _, err := f.Write(reqBody); err != nil {
+			c.l.Err("error writing http dump file %v: %v", fPath, err)
 			return
 		}
 	} else {
 		if _, err := f.Write([]byte("EMPTY BODY")); err != nil {
-			c.log.Err("error writing http dump file %v: %v", fPath, err)
+			c.l.Err("error writing http dump file %v: %v", fPath, err)
 			return
 		}
 	}
-
-	f.WriteString("\n")
+	if _, err := f.WriteString("\n"); err != nil {
+		c.l.Err("failed to write string: %s", err.Error())
+		return
+	}
 
 	// Request and response separator
-	f.WriteString("\n---\n\n")
+	if _, err := f.WriteString("\n---\n\n"); err != nil {
+		c.l.Err("failed to write string: %s", err.Error())
+		return
+	}
 
 	// Dump response headers
 	for k, h := range resp.Header {
 		for _, v := range h {
 			if _, err := f.Write([]byte(fmt.Sprintf("%v: %v\n", k, v))); err != nil {
-				c.log.Err("error writing http dump file %v: %v", fPath, err)
+				c.l.Err("error writing http dump file %v: %v", fPath, err)
 				return
 			}
 		}
 	}
-	f.WriteString("\n")
+	if _, err := f.WriteString("\n"); err != nil {
+		c.l.Err("failed to write string: %s", err.Error())
+		return
+	}
 
 	// Dump response body
-	if len(*respBody) > 0 {
-		if _, err := f.Write(*respBody); err != nil {
-			c.log.Err("error writing http dump file %v: %v", fPath, err)
+	if len(respBody) > 0 {
+		if _, err := f.Write(respBody); err != nil {
+			c.l.Err("error writing http dump file %v: %v", fPath, err)
 			return
 		}
 	} else {
 		if _, err := f.Write([]byte("EMPTY BODY")); err != nil {
-			c.log.Err("error writing http dump file %v: %v", fPath, err)
+			c.l.Err("error writing http dump file %v: %v", fPath, err)
 			return
 		}
 	}
 }
 
 // Request performs an HTTP request
-func (c *Cli) Request(method, u string, header *http.Header, body []byte) (*http.Response, *[]byte, error) {
+func (c *Cli) Request(method, u string, header http.Header, body []byte) (*http.Response, []byte, error) {
 	var (
 		err      error
 		req      *http.Request
@@ -146,7 +164,7 @@ func (c *Cli) Request(method, u string, header *http.Header, body []byte) (*http
 
 	// Ensure headers
 	if header == nil {
-		header = &http.Header{}
+		header = http.Header{}
 	}
 	if header.Get("User-Agent") == "" {
 		header.Set("User-Agent", c.userAgent)
@@ -169,7 +187,7 @@ func (c *Cli) Request(method, u string, header *http.Header, body []byte) (*http
 	if err != nil {
 		return nil, nil, err
 	}
-	req.Header = *header
+	req.Header = header
 
 	// Send request
 	c.reqNum++
@@ -182,7 +200,7 @@ func (c *Cli) Request(method, u string, header *http.Header, body []byte) (*http
 			break
 		}
 
-		c.log.Err("req #%d(%v): %v %v; error: %v", c.reqNum, tryN, method, u, err)
+		c.l.Err("req #%d(%v): %v %v; error: %v", c.reqNum, tryN, method, u, err)
 
 		if tryN == c.reqTries {
 			return nil, nil, err
@@ -194,28 +212,30 @@ func (c *Cli) Request(method, u string, header *http.Header, body []byte) (*http
 			}
 		}
 	}
-	c.log.Debug("req #%d(%v): %v %v; status: %v", c.reqNum, tryN, method, u, resp.Status)
+	c.l.Debug("req #%d(%v): %v %v; status: %v", c.reqNum, tryN, method, u, resp.Status)
 
 	// Load response body
-	defer resp.Body.Close()
+	defer func() {
+		_ = resp.Body.Close()
+	}()
 	if respBody, err = ioutil.ReadAll(resp.Body); err != nil {
 		return resp, nil, fmt.Errorf("error while reading response body: %v", err)
 	}
 
 	if c.debug {
-		c.DumpTransaction(req, resp, &body, &respBody)
+		c.DumpTransaction(req, resp, body, respBody)
 	}
 
 	// Check response status
 	if resp.StatusCode >= 400 {
-		return resp, &respBody, fmt.Errorf("HTTP response status: %v", resp.Status)
+		return resp, respBody, fmt.Errorf("HTTP response status: %v", resp.Status)
 	}
 
-	return resp, &respBody, err
+	return resp, respBody, err
 }
 
 // Get perform a GET request
-func (c *Cli) Get(u string, args *url.Values, header *http.Header) (*[]byte, error) {
+func (c *Cli) Get(u string, args url.Values, header http.Header) ([]byte, error) {
 	if args != nil {
 		u = util.CombineURL(u, "", args)
 	}
@@ -225,13 +245,13 @@ func (c *Cli) Get(u string, args *url.Values, header *http.Header) (*[]byte, err
 }
 
 // GetQueryDoc performs a GET request and transform response into a goquery document
-func (c *Cli) GetQueryDoc(u string, args *url.Values, header *http.Header) (*goquery.Document, error) {
+func (c *Cli) GetQueryDoc(u string, args url.Values, header http.Header) (*goquery.Document, error) {
 	body, err := c.Get(u, args, header)
 	if err != nil {
 		return nil, err
 	}
 
-	doc, err := goquery.NewDocumentFromReader(bytes.NewReader(*body))
+	doc, err := goquery.NewDocumentFromReader(bytes.NewReader(body))
 	if err != nil {
 		return nil, err
 	}
@@ -240,9 +260,9 @@ func (c *Cli) GetQueryDoc(u string, args *url.Values, header *http.Header) (*goq
 }
 
 // GetJSON performs a GET HTTP request and parses the response into a JSON
-func (c *Cli) GetJSON(u string, args *url.Values, header *http.Header, data interface{}) error {
+func (c *Cli) GetJSON(u string, args url.Values, header http.Header, data interface{}) error {
 	if header == nil {
-		header = &http.Header{}
+		header = http.Header{}
 	}
 	if header.Get("X-Requested-With") == "" {
 		header.Set("X-Requested-With", "XMLHttpRequest")
@@ -253,14 +273,14 @@ func (c *Cli) GetJSON(u string, args *url.Values, header *http.Header, data inte
 		return err
 	}
 
-	return json.Unmarshal(*body, data)
+	return json.Unmarshal(body, data)
 }
 
 // GetFile gets a file and stores it on the disk.
 //
 // If fPath doesn't contain an extension, it will be added automatically.
 // In case of success file extension returned
-func (c *Cli) GetFile(u string, args *url.Values, header *http.Header, fPath string) (string, error) {
+func (c *Cli) GetFile(u string, args url.Values, header http.Header, fPath string) (string, error) {
 	fExt := ""
 
 	if args != nil {
@@ -295,17 +315,21 @@ func (c *Cli) GetFile(u string, args *url.Values, header *http.Header, fPath str
 	if err != nil {
 		return "", fmt.Errorf("error creating file %v: %v", fPath, err)
 	}
+	defer func() {
+		_ = f.Close()
+	}()
 
-	f.Write(*body)
-	f.Close()
+	if _, err := f.Write(body); err != nil {
+		c.l.Err("failed to write to file: %s", err.Error())
+	}
 
 	return fExt, nil
 }
 
 // Post performs a POST request
-func (c *Cli) Post(u string, args *url.Values, header *http.Header) (*[]byte, error) {
+func (c *Cli) Post(u string, args url.Values, header http.Header) ([]byte, error) {
 	if header == nil {
-		header = &http.Header{}
+		header = http.Header{}
 	}
 	if header.Get("Content-Type") == "" {
 		header.Add("Content-Type", "application/x-www-form-urlencoded")
@@ -318,7 +342,7 @@ func (c *Cli) Post(u string, args *url.Values, header *http.Header) (*[]byte, er
 // GetExtIPAddrInfo returns information about client's external IP address
 func (c *Cli) GetExtIPAddrInfo() (string, error) {
 	var (
-		b   *[]byte
+		b   []byte
 		r   string
 		err error
 	)
@@ -326,12 +350,12 @@ func (c *Cli) GetExtIPAddrInfo() (string, error) {
 	if b, err = c.Get("https://ifconfig.io/ip", nil, nil); err != nil {
 		return r, err
 	}
-	r += fmt.Sprintf("address: %s", *b)
+	r += fmt.Sprintf("address: %s", b)
 
 	if b, err = c.Get("https://ifconfig.io/country_code", nil, nil); err != nil {
 		return r, err
 	}
-	r = fmt.Sprintf("%v, region: %s", r, *b)
+	r = fmt.Sprintf("%v, region: %s", r, b)
 
 	return strings.ReplaceAll(r, "\n", ""), nil
 }
@@ -403,7 +427,7 @@ func New(name string, dumpDir, ua, prxURL string, log *logger.Logger, onErr Erro
 		debug:     debug,
 		dumpDir:   dumpDir,
 		id:        sID,
-		log:       log,
+		l:         log,
 		userAgent: ua,
 		reqErrH:   onErr,
 		reqTries:  10,
