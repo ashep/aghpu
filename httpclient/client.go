@@ -47,7 +47,7 @@ type Cli struct {
 type ErrorHandler func(ctx context.Context, c *Cli, req *http.Request, rsp *http.Response, err error, tryN int) error
 
 // New instantiates a client
-func New(ctx context.Context, name string, dumpDir, ua, prxURL string, dump bool, log *logger.Logger) (*Cli, error) {
+func New(name string, dumpDir, ua, prxURL string, dump bool, log *logger.Logger) (*Cli, error) {
 	var err error
 
 	if log == nil {
