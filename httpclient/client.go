@@ -21,9 +21,8 @@ import (
 	"time"
 
 	"github.com/PuerkitoBio/goquery"
-
-	"eyeons.com/parser/aghpu/logger"
-	"eyeons.com/parser/aghpu/util"
+	"github.com/ashep/aghpu/logger"
+	"github.com/ashep/aghpu/util"
 )
 
 // Cli is a HTTP client
