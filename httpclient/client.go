@@ -30,11 +30,11 @@ type Cli struct {
 	mux           *sync.Mutex
 	handlingError bool
 
-	id        string
-	dump      bool
-	dumpDir   string
-	reqTries  int
-	userAgent string
+	id         string
+	dump       bool
+	dumpDir    string
+	maxRetries int
+	userAgent  string
 
 	errorHandler ErrorHandler
 	reqNum       int32
@@ -108,14 +108,14 @@ func New(name string, dumpDir, ua, prxURL string, dump bool, log *logger.Logger)
 	}
 
 	cli := &Cli{
-		mux:       &sync.Mutex{},
-		cli:       &c,
-		dump:      dump,
-		dumpDir:   dumpDir,
-		id:        sID,
-		l:         log,
-		userAgent: ua,
-		reqTries:  10,
+		mux:        &sync.Mutex{},
+		cli:        &c,
+		dump:       dump,
+		dumpDir:    dumpDir,
+		id:         sID,
+		l:          log,
+		userAgent:  ua,
+		maxRetries: 10,
 	}
 
 	return cli, nil
@@ -129,6 +129,11 @@ func (c *Cli) Client() *http.Client {
 // SetErrorHandler sets HTTP request error handler
 func (c *Cli) SetErrorHandler(fn ErrorHandler) {
 	c.errorHandler = fn
+}
+
+// SetMaxRetries sets maximum number of request retries
+func (c *Cli) SetMaxRetries(n int) {
+	c.maxRetries = n
 }
 
 // Reset resets the client
@@ -331,7 +336,7 @@ func (c *Cli) DoRequest(
 			}
 		}
 
-		if tryNum == c.reqTries || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		if tryNum == c.maxRetries || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return nil, nil, err
 		}
 
