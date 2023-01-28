@@ -32,7 +32,7 @@ func New(name string, level int, dirPath, fName string) (*Logger, error) {
 	}
 
 	if dirPath != "" {
-		f, err := os.Create(filepath.Join(dirPath, fName))
+		f, err := os.OpenFile(filepath.Join(dirPath, fName), os.O_CREATE|os.O_APPEND|os.O_WRONLY, 0644)
 		if err != nil {
 			return nil, err
 		}
